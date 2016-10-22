@@ -1,6 +1,7 @@
 import json
 from channels import Channel
 from channels.auth import channel_session_user_from_http, channel_session_user
+from django.contrib.auth.models import User
 
 from .settings import MSG_TYPE_LEAVE, MSG_TYPE_ENTER, NOTIFY_USERS_ON_ENTER_OR_LEAVE_ROOMS
 from .models import Room
@@ -32,6 +33,7 @@ def ws_receive(message):
     payload = json.loads(message['text'])
     payload['reply_channel'] = message.content['reply_channel']
     Channel("chat.receive").send(payload)
+    Channel("chat.log").send(payload)
 
 
 @channel_session_user
@@ -111,3 +113,31 @@ def chat_send(message):
     room = get_room_or_error(message["room"], message.user)
     # Send the message along
     room.send_message(message["message"], message.user)
+
+
+@channel_session_user
+@catch_client_error
+def chat_log(message):
+    room, _ = Room.objects.get_or_create(title='log_room')
+
+    log_message = {}
+    log_message['room'] = str(room.id)
+    log_message['username'] = 'chatbot'
+    log_message['msg_type'] = 0
+
+    chatroom = Room.objects.get(id=message.content.get('room'))
+
+    if message.content.get('command') == 'join':
+        log_message['message'] = "{} joined {}".format(message.user.username,
+                                                       chatroom.title)
+    elif message.content.get('command') == 'leave':
+        log_message['message'] = "{} left {}".format(message.user.username,
+                                                     chatroom.title)
+    else:
+        log_message['message'] = "{} in {}: {}".format(message.user.username,
+                                                       chatroom.title,
+                                                       message.content.get('message'))
+
+    room.websocket_group.send(
+        {"text": json.dumps(log_message)}
+    )
